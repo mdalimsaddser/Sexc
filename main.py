@@ -3,7 +3,7 @@ import time
 import os
 import subprocess
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 # ================= CONFIG =================
 
@@ -11,198 +11,166 @@ BOT_TOKEN = "8360458696:AAE2jhLfMaqf4p7bEEAsbMsSf9WhPeFasu0"
 CHAT_ID = "-1003671777907"
 
 SITES = [
-    {"base": "https://lol49.org", "name": "Lol49"},
-    {"base": "https://maal69.com.co", "name": "Maal69"},
-    {"base": "https://mmsbaba.com", "name": "MMSBaba"},
-    {"base": "https://spicymms.com", "name": "SpicyMMS"},
-    {"base": "https://mydesi.net", "name": "MyDesi"},
-    {"base": "https://aagmaal.farm", "name": "Aagmaal"},
-    # আরও যোগ করতে পারো যদি test করে working পাও
+    {"base": "https://viralkand.com", "name": "ViralKand"},  # MMS Videos + pics
+    {"base": "https://www.viralhub.co.in", "name": "ViralHub"},  # Viral Desi MMS + images
+    {"base": "https://kamatv.in", "name": "KamaTV"},  # Active Desi
+    {"base": "https://aagmaal.farm", "name": "Aagmaal"},  # Porn + gallery pics
+    # যদি fsiblog চেক করো: {"base": "https://fsiblog5.com", "name": "FSIBlog5"},
 ]
 
-LOGO = "logo.png"
 TMP = "tmp"
-DELAY = 12  # anti-ban
+DELAY = 15  # anti-ban
 
 os.makedirs(TMP, exist_ok=True)
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Android 10; Mobile; rv:68.0) Gecko/68.0 Firefox/68.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.google.com/"
 }
 
-TG_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}/"
-TG_VIDEO = TG_BASE + "sendVideo"
-TG_PHOTO = TG_BASE + "sendPhoto"
-TG_DOC = TG_BASE + "sendDocument"
-
-# ================= UTILS =================
-
-def ffmpeg_available():
-    try:
-        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
-    except:
-        return False
-
-FFMPEG_OK = ffmpeg_available()
-print("FFmpeg:", "OK" if FFMPEG_OK else "NOT FOUND (logo disabled)")
+TG_VIDEO = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
+TG_PHOTO = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+TG_DOC = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
 
 # ================= HELPERS =================
 
 def fast_download(url, path):
     try:
-        with requests.get(url, headers=HEADERS, stream=True, timeout=45) as r:
+        with requests.get(url, headers=HEADERS, stream=True, timeout=60) as r:
             r.raise_for_status()
-            with open(path, "wb", buffering=1024*1024) as f:
-                for chunk in r.iter_content(1024*1024):
+            with open(path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1024*1024):
                     f.write(chunk)
         return True
     except Exception as e:
-        print("❌ Download fail:", e)
+        print(f"DL fail: {url} -> {e}")
         return False
 
-def add_logo_fast(inp, out):
-    if not FFMPEG_OK or not os.path.exists(LOGO):
-        return False
-    cmd = [
-        "ffmpeg", "-y", "-i", inp, "-i", LOGO,
-        "-filter_complex", "overlay=W-w-15:H-h-15",
-        "-c:v", "libx264", "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        "-c:a", "copy", out
-    ]
-    result = subprocess.run(cmd, capture_output=True)
-    return result.returncode == 0 and os.path.exists(out)
-
-def extract_content(html, page_url):
+def extract_video_and_pics(html, base_url):
     soup = BeautifulSoup(html, "html.parser")
     video_urls = []
     pic_urls = []
 
-    # Video extract (improved)
-    for form in soup.find_all("form", action=True):
-        action = form.get("action")
-        if action and ("download" in action.lower() or "mp4" in action.lower()):
-            video_urls.append(urljoin(page_url, action))
+    # Videos: mp4, download links, forms
+    for tag in soup.find_all(['a', 'source', 'video', 'form']):
+        link = tag.get('href') or tag.get('src') or tag.get('action')
+        if link:
+            full = urljoin(base_url, link)
+            if ".mp4" in full.lower() or "download" in full.lower() or "video" in full.lower():
+                video_urls.append(full)
 
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if ".mp4" in href.lower() or "download" in href.lower() or "video" in href.lower():
-            video_urls.append(urljoin(page_url, href))
-
-    # Pics extract (gallery/images)
+    # Pics: img src (gallery/thumbs, avoid small logos)
     for img in soup.find_all("img", src=True):
         src = img["src"]
-        if src.lower().endswith((".jpg", ".jpeg", ".png", ".webp")) and len(src) > 20:
-            full_src = urljoin(page_url, src)
-            if "thumb" not in full_src and "logo" not in full_src:  # avoid small thumbs
-                pic_urls.append(full_src)
+        full_src = urljoin(base_url, src)
+        if full_src.lower().endswith((".jpg", ".jpeg", ".png", ".webp")) and "logo" not in full_src and "thumb" not in full_src.lower():
+            pic_urls.append(full_src)
 
-    return list(set(video_urls))[:3], list(set(pic_urls))[:5]  # limit to avoid spam
+    video_urls = list(set(video_urls))[:2]  # max 2 videos per post
+    pic_urls = list(set(pic_urls))[:4]     # max 4 pics per post
+    return video_urls, pic_urls
 
-def send_to_telegram_video(path, title, site_name):
+def send_video(path, title, site_name):
     if not os.path.exists(path):
         return False
     size_mb = os.path.getsize(path) / (1024**2)
-    print(f"     Video size: {size_mb:.1f} MB")
+    print(f"Video size: {size_mb:.1f} MB")
     caption = f"<b>{title}</b>\nFrom: {site_name}"
+    api = TG_VIDEO if size_mb <= 50 else TG_DOC
+    key = "video" if api == TG_VIDEO else "document"
+    data = {
+        "chat_id": CHAT_ID,
+        "caption": caption,
+        "parse_mode": "HTML"
+    }
+    if api == TG_VIDEO:
+        data["supports_streaming"] = True
     try:
-        files = {"video": open(path, "rb")}
-        data = {"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML", "supports_streaming": True}
-        r = requests.post(TG_VIDEO, data=data, files=files, timeout=600)
-        if r.status_code == 200 and r.json().get("ok"):
-            print("     ✔ Video sent!")
-            return True
-        print("     Video fail:", r.text[:150])
-        # fallback doc
-        files = {"document": open(path, "rb")}
-        r = requests.post(TG_DOC, data=data, files=files, timeout=600)
-        if r.status_code == 200 and r.json().get("ok"):
-            print("     ✔ Sent as doc")
-            return True
-        return False
+        with open(path, "rb") as f:
+            files = {key: f}
+            r = requests.post(api, data=data, files=files, timeout=900)
+        print(f"Video response: {r.status_code} - {r.text[:150]}")
+        return r.status_code == 200 and r.json().get("ok", False)
     except Exception as e:
-        print("     Send error:", e)
+        print(f"Video send error: {e}")
         return False
 
 def send_pics(pic_urls, title, site_name):
-    caption = f"<b>Pics from: {title}</b>\n{site_name}"
-    for pic in pic_urls[:3]:  # limit
+    caption = f"<b>Pics: {title}</b>\nFrom: {site_name} (separate pics)"
+    for idx, pic in enumerate(pic_urls):
         try:
-            files = {"photo": requests.get(pic, timeout=20).content}
-            data = {"chat_id": CHAT_ID, "caption": caption if pic == pic_urls[0] else "", "parse_mode": "HTML"}
+            img_data = requests.get(pic, timeout=30).content
+            files = {"photo": img_data}
+            data = {
+                "chat_id": CHAT_ID,
+                "caption": caption if idx == 0 else "",
+                "parse_mode": "HTML"
+            }
             r = requests.post(TG_PHOTO, data=data, files=files, timeout=60)
             if r.status_code == 200:
-                print("     ✔ Pic sent")
-            time.sleep(3)
-        except:
-            pass
+                print(f"Pic {idx+1} sent")
+            time.sleep(4)  # avoid flood
+        except Exception as e:
+            print(f"Pic send fail: {e}")
 
 # ================= MAIN =================
 
-print("\n=== Best Desi MMS + Pics Scraper Bot - Feb 2026 ===\n")
+print("Bot started - Video + Separate Pics mode (2026 updated sites)")
 
 for site in SITES:
     base = site["base"]
     name = site["name"]
-    print(f"\n=== {name} ({base}) ===")
+    print(f"\n=== Processing {name} ({base}) ===")
     
-    page = 1
-    while page <= 4:  # limit per site
+    for page in range(1, 4):  # 3 pages per site to test
         page_url = f"{base}/" if page == 1 else f"{base}/page/{page}/"
-        print(f"  Page {page}")
+        print(f"Page {page}")
         
         try:
-            resp = requests.get(page_url, headers=HEADERS, timeout=30)
-            resp.raise_for_status()
+            r = requests.get(page_url, headers=HEADERS, timeout=30)
+            r.raise_for_status()
         except Exception as e:
-            print("  Error:", e)
-            break
+            print(f"Page fail: {e}")
+            continue
         
-        soup = BeautifulSoup(resp.text, "html.parser")
-        posts = soup.find_all("a", class_="title", href=True)
-        if not posts:
-            posts = soup.find_all("a", href=True)  # fallback
+        soup = BeautifulSoup(r.text, "html.parser")
+        posts = soup.find_all("a", href=True)
         
-        for i, post in enumerate(posts[:8], 1):
-            title = post.get_text(strip=True) or "Untitled"
-            href = post.get("href", "")
-            if not href:
+        for post in posts[:8]:  # limit per page
+            title = post.get_text(strip=True)
+            if not title or len(title) < 15:
                 continue
-            video_page = urljoin(base, href)
-            print(f"    [{i}] {title[:50]}...")
+            href = post["href"]
+            if not href or "#" in href:
+                continue
+            full_page = urljoin(base, href)
+            print(f"  - {title[:60]}...")
             
-            time.sleep(4)
+            time.sleep(6)
             
             try:
-                pr = requests.get(video_page, headers=HEADERS, timeout=30)
-                video_urls, pic_urls = extract_content(pr.text, video_page)
-            except:
+                pr = requests.get(full_page, headers=HEADERS, timeout=40)
+                videos, pics = extract_video_and_pics(pr.text, full_page)
+            except Exception as e:
+                print(f"Post page fail: {e}")
                 continue
             
-            if video_urls:
-                for v_url in video_urls:
-                    raw = os.path.join(TMP, f"raw_{name}_{page}_{i}.mp4")
-                    final = os.path.join(TMP, f"final_{name}_{page}_{i}.mp4")
-                    print("      ↓ Video DL...")
-                    if fast_download(v_url, raw):
-                        use = raw
-                        if FFMPEG_OK and os.path.exists(LOGO):
-                            if add_logo_fast(raw, final):
-                                use = final
-                        print("      ↑ Sending video...")
-                        send_to_telegram_video(use, title, name)
-                        for f in [raw, final]:
-                            if os.path.exists(f): os.remove(f)
+            if videos:
+                for v_idx, v_url in enumerate(videos):
+                    raw_path = os.path.join(TMP, f"vid_{name}_{page}_{v_idx}.mp4")
+                    print(f"    ↓ Video {v_idx+1} DL: {v_url[:80]}...")
+                    if fast_download(v_url, raw_path):
+                        print("    ↑ Sending video...")
+                        send_video(raw_path, title, name)
+                        try:
+                            os.remove(raw_path)
+                        except:
+                            pass
             
-            if pic_urls:
-                print("      ↑ Sending pics...")
-                send_pics(pic_urls, title, name)
+            if pics:
+                print(f"    Found {len(pics)} pics → sending separately...")
+                send_pics(pics, title, name)
             
             time.sleep(DELAY)
-        
-        page += 1
-        time.sleep(10)
 
-print("\nFinished. Check Telegram channel!")
+print("\nDone! Check channel. If no video → console-এ error দেখো বা local Bot API চালাও (2GB limit)। আরও site চাইলে বলো।")
